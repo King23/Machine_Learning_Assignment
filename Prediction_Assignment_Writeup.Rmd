@@ -1,0 +1,115 @@
+---
+title: "Practical Machine Learning  
+- Prediction Assignment Writeup"
+date: "Monday, January 25, 2016"
+output: html_document
+---
+
+###Background  
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement and a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).  
+
+###Data
+The training data for this project are available here:  
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:  
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source:   
+http://groupware.les.inf.puc-rio.br/har.
+
+
+###Project Intructions
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+
+
+###1) Data Exploratory and Data Cleaning
+
+```{r, echo=TRUE}
+trainSet <- read.csv("pml-training.csv", na.strings=c("", "NA"))
+trainSet <-trainSet[,colSums(is.na(trainSet)) == 0] #keep columns that doesn't contain any NA in rows
+
+testSet <- read.csv("pml-testing.csv", na.strings=c("", "NA")) #apply the same to testSet
+testSet <-testSet[,colSums(is.na(testSet)) == 0]
+
+dim(trainSet); dim(testSet)
+str(trainSet, list.len=20)
+```
+From the dataset structure, first we remove the columns 1:7 which contain information not related to the prediction modeling.
+
+```{r, echo=TRUE}
+trainSet <- trainSet[,-(1:7)] #remove the 1:7 columns
+trainCol <- names(trainSet) #get the colname from tranSet
+testSet <- testSet[, names(testSet) %in% trainCol] #select the testSet colname same as trainSet
+dim(trainSet); dim(testSet) #testSet will have 1 column less than trainSet due to "classe" column is not in testSet
+```
+Now we have both cleaned data for trainSet and testSet to start work on Prediction Modeling.
+
+###2) Prediction Modeling
+First, we check if any near zero variance to remove zero covariates.
+```{r, echo=TRUE}
+library(caret)
+zeroCov <- nearZeroVar(trainSet, saveMetrics=TRUE)
+trainSet <- trainSet[,zeroCov$nzv==FALSE]
+dim(trainSet)
+```
+From the data dimension, no zero covariates being removed. Now, proceed to splitting the data for model training and cross validation.
+
+```{r, echo=TRUE}
+set.seed(32111)
+inTrain <- createDataPartition(y = trainSet$classe, p = 0.7, list=FALSE)
+training <- trainSet [inTrain, ]
+testing <- trainSet[-inTrain, ]
+```
+
+Train the prediction model by **using Random Forest** with **trainControl using 'cv'** method.
+
+```{r, echo=TRUE}
+#setup the library and cluster to enable multi-thread processing (this has been shared in discussion forum)
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1) 
+registerDoParallel(cluster)
+
+modelFit <- train (classe ~. , method="rf", data=training, trControl=trainControl(method="cv",number=2), prox=TRUE, verbose=TRUE, allowParallel=TRUE)
+
+stopCluster(cluster) #shut down the cluster after processing
+saveRDS(modelFit, "modelRF.Rds") #save the trained model in a file, can be called out later for reuse
+```
+
+Take a look at the importants variables as below.
+```{r, echo=TRUE}
+library(randomForest)
+modelFit <- readRDS("modelRF.Rds")
+varImpPlot(modelFit$finalModel)
+
+```  
+
+
+```{r, echo=TRUE}
+modelFit$finalModel
+
+```  
+The estimated error rate is 0.71%.
+
+###3) Cross Validation and Out Of Sample Error Rate
+Now, we takes the trained model to perform cross validation on the testing dataset split from the 30% of trainSet.
+
+```{r, echo=TRUE}
+prediction <- predict(modelFit, newdata=testing)
+confusionMatrix(prediction, testing$classe)
+```
+
+The prediction result on the testing dataset show the trained model **accuracy is 99.35%** which is pretty high, as expected by using Random Forest. The **out of sample error** is 100%-99.35% = 0.65%
+
+
+###4) Prediction to 20 Test Cases in Quiz
+```{r, echo=TRUE}
+predict20 <- predict(modelFit, newdata=testSet)
+predict20
+```
+
+The final predictions for the 20 test cases in the qiuz are:  
+**`r predict20`**
+
